@@ -26,7 +26,12 @@ const ensureRoomJoined = (socket, next) => {
   if (socket.roomJoined) {
     next();
   } else {
-    console.error("User not joined room");
+    if (roomId && io.sockets.adapter.rooms[roomId]) {
+      const room1 = io.sockets.adapter.rooms[roomId];
+      console.log(Object.keys(room1.sockets));
+    } else {
+      console.log('Room not found or roomId is undefined');
+    }
   }
 };
 
@@ -47,7 +52,7 @@ io.on("connection", (socket) => {
     room.getProducers().forEach((producer) => {
       producersIds.push(producer.id);
     });
-
+  
     socket.join(roomId);
 
     callback({ producersIds });
@@ -159,12 +164,17 @@ io.on("connection", (socket) => {
         });
         
         producer.on("transportclose", () => {
-          producer.close();
+          console.log("Producer's transport closed");
+          // producer.close();
+        });
+
+        producer.on("close", () => {
+          console.log("Producer closed");
         });
 
         // console.log("Producer :" + producer.id + "is added for user :" + user.id);
 
-        room.addProducer(producer);
+        room.addProducer(socket.id , producer);//user.id is socket.id
 
         // Notify other peers in the room
         socket.to(roomId).emit("newProducer", {
@@ -195,14 +205,11 @@ socket.on(
       return callback({ error: "User not found" });
     }
 
-    const producer = room.getProducer(producerId);
+    const producer = room.getProducer(socket.id);
     if (!producer) {
       return callback({ error: "Producer not found" });
     }
     
-
-    // console.log("RTP Capabilities codecs of producer are");
-    // console.log(producer.rtpParameters.codecs);
 
     const router = room.getRouter();
     if (!router.canConsume({ producerId, rtpCapabilities })) {
@@ -211,13 +218,6 @@ socket.on(
 
     const transport = user.consumerTransports.find((t) => t.id === transportId);
 
-    // console.log("consumerTransport is");
-    // console.log(transport.id);
-
-    // console.log("RTP Capabilities of client are");
-    // console.log(rtpCapabilities.codecs);
-
-    
     const consumer = await transport.consume(
       {
         producerId : producer.id,
@@ -226,21 +226,13 @@ socket.on(
       }
     );
 
-    // console.log("Consumer RTP Parameters codecs are");
-    // console.log(consumer.rtpParameters.codecs);
-    // console.log(consumer.kind);
+    consumer.on("producerclose", () =>
+      {
+        // console.log("associated producer closed so consumer closed",consumer.producerId," and consumerId is ",consumer.id);
+      });
 
-    consumer.on("transportclose", () => {
-      console.log("Transport close");
-      consumer.close();
-    });
-
-    consumer.on("producerclose", () => {
-      console.log("Producer close");
-    });
 
     user.addConsumer(consumer);
-
 
     callback({
       id: consumer.id,
@@ -279,23 +271,34 @@ socket.on(
 
   });
 
+
   socket.on("leaveRoom", async ({ roomId , producerId }, callback) => {
+
     const room = rooms.get(roomId);
     if (!room) {
       return callback({ error: "Room not found" });
     }
 
-    room.removePeer(socket.id,producerId);
+    socket.leave(roomId);
+
+    console.log("producer count before leaving room is " + room.getProducers().length);
+    room.getProducer(socket.id).close();
+    room.removePeer(socket.id);
+    console.log("producer count after leaving room is " + room.getProducers().length);
 
     if (room.getPeers().size === 0) {
       rooms.delete(roomId);
     }
 
+    io.in(roomId).emit("producerClosed", { producerId});
+
+   
+
   });
 
-  socket.on("disconnect", () => {
-    socket.leaveAll();
-  });
+  // socket.on("disconnect", () => {
+    
+  // });
 });
 
 server.listen(3000, () => {

@@ -26,11 +26,11 @@ class Room {
     this.peers.set(peer.id, peer);
   }
 
-  removePeer(peerId,producerId) {
+  removePeer(peerId) {
     const peer = this.peers.get(peerId);//peerId is Users socket.id
     if (peer) {
       this.peers.delete(peerId);
-      this.producers.delete(producerId);
+      this.producers.delete(peerId);
     }
   }
 
@@ -46,16 +46,16 @@ class Room {
     return this.router;
   }
 
-  addProducer(producer) {
-    this.producers.set(producer.id, producer);
+  addProducer(userId , producer) {
+    this.producers.set(userId, producer);
   }
 
-  removeProducer(producerId) {
-    this.producers.delete(producerId);
+  removeProducer(userId) {
+    this.producers.delete(userId);
   }
 
-  getProducer(producerId) {
-    return this.producers.get(producerId);
+  getProducer(userId) {
+    return this.producers.get(userId);
   }
 
   getProducers() {

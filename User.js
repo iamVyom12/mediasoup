@@ -5,7 +5,7 @@ class User {
       this.socket = socket;
       this.producerTransport = null;
       this.consumerTransports = [];
-      this.consumers = [];
+      this.consumers = new Map();
     }
   
     async createProducerTransport(router) {
@@ -70,19 +70,19 @@ class User {
   
   
     addConsumer(consumer) {
-      this.consumers.push(consumer);
+      this.consumers.set(consumer.id, consumer);
     }
 
     getConsumer(consumerId) {
-        return this.consumers.find(consumer => consumer.id === consumerId);
+        return this.consumers.get(consumerId);
         }
 
-    close() {
-      this.producers.forEach(producer => producer.close());
-      this.consumers.forEach(consumer => consumer.close());
-      if (this.producerTransport) this.producerTransport.close();
-      this.consumerTransports.forEach(transport => transport.close());
-    }
+    // close() {
+    //   this.producers.forEach(producer => producer.close());
+    //   this.consumers.forEach(consumer => consumer.close());
+    //   if (this.producerTransport) this.producerTransport.close();
+    //   this.consumerTransports.forEach(transport => transport.close());
+    // }
     
   }
   
