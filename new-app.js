@@ -140,7 +140,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "produce",
-    async ({ roomId, transportId, kind, rtpParameters }, callback) => {
+    async ({ roomId, transportId, kind, rtpParameters ,appData }, callback) => {
       try {
         const room = rooms.get(roomId);
         if (!room) {
@@ -161,6 +161,7 @@ io.on("connection", (socket) => {
         const producer = await user.producerTransport.produce({
           kind,
           rtpParameters,
+          appData
         });
         
         producer.on("transportclose", () => {
@@ -174,13 +175,18 @@ io.on("connection", (socket) => {
 
         // console.log("Producer :" + producer.id + "is added for user :" + user.id);
 
-        room.addProducer(socket.id , producer);//user.id is socket.id
+        room.addProducer(producer);//user.id is socket.id
+
+
+
+        console.log("producer", room.getProducer(producer.id).id, "appData is ", producer.appData);
 
         // Notify other peers in the room
         socket.to(roomId).emit("newProducer", {
           producerId: producer.id,
           peerId: user.id,
           kind,
+          appData: producer.appData
         });
 
         callback({ id: producer.id });
@@ -205,7 +211,7 @@ socket.on(
       return callback({ error: "User not found" });
     }
 
-    const producer = room.getProducer(socket.id);
+    const producer = room.getProducer(producerId);
     if (!producer) {
       return callback({ error: "Producer not found" });
     }
@@ -218,11 +224,14 @@ socket.on(
 
     const transport = user.consumerTransports.find((t) => t.id === transportId);
 
+    console.log("producer's appData is ", producer.appData);
+
     const consumer = await transport.consume(
       {
         producerId : producer.id,
         rtpCapabilities,
         paused: true,
+        appData: producer.appData
       }
     );
 
@@ -234,12 +243,15 @@ socket.on(
 
     user.addConsumer(consumer);
 
+    console.log("consumer appData is ", consumer.appData);
+
     callback({
       id: consumer.id,
       producerId: producerId,
       kind: consumer.kind,
       paused: true,
       rtpParameters: consumer.rtpParameters,
+      appData: consumer.appData
     });
   }
 );
@@ -272,7 +284,7 @@ socket.on(
   });
 
 
-  socket.on("leaveRoom", async ({ roomId , producerId }, callback) => {
+  socket.on("leaveRoom", ({ roomId , videoProducerId,audioProducerId }, callback) => {
 
     const room = rooms.get(roomId);
     if (!room) {
@@ -280,19 +292,18 @@ socket.on(
     }
 
     socket.leave(roomId);
-
+    
     console.log("producer count before leaving room is " + room.getProducers().length);
-    room.getProducer(socket.id).close();
-    room.removePeer(socket.id);
+    room.getProducer(videoProducerId).close();
+    room.getProducer(audioProducerId).close();
+    room.removePeer(socket.id,videoProducerId,audioProducerId);
     console.log("producer count after leaving room is " + room.getProducers().length);
 
     if (room.getPeers().size === 0) {
       rooms.delete(roomId);
     }
 
-    io.in(roomId).emit("producerClosed", { producerId});
-
-   
+    io.in(roomId).emit("producerClosed", { videoProducerId, audioProducerId });  
 
   });
 

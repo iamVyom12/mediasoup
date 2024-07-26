@@ -44,25 +44,36 @@ let audioParams = {
 let producerTransport;
 let consumerTransport = new Map();
 let videoProducer;
-let videoProducerId;
+// let videoProducerId;
 let audioProducer;
+// let audioProducerId;
 let consumers = new Map();
 
 let startvideo = async () => {
   const video = document.getElementsByClassName("local-video")[0];
   await navigator.mediaDevices
-    .getUserMedia({ video: true, audio: false })
+    .getUserMedia({ video: true, audio: true })
     .then((stream) => {
       video.srcObject = stream;
       const track = stream.getVideoTracks()[0];
       const audioTrack = stream.getAudioTracks()[0];
       videoParams.track = track;
       audioParams.track = audioTrack;
-      document
-        .getElementById("videoButton")
+      const videoButton = document.getElementById("videoButton");
+      const muteButton = document.getElementById("muteButton");
+
+      videoButton
         .addEventListener("click", async () => {
-          //toggle video on/off
           track.enabled = !track.enabled;
+
+          videoButton.innerHTML = track.enabled ? '<i class="fas fa-video"></i>' : '<i class="fas fa-video-slash"></i>';
+
+        });
+      muteButton
+        .addEventListener("click", async () => {
+          audioTrack.enabled = !audioTrack.enabled;
+
+          muteButton.innerHTML = audioTrack.enabled ? '<i class="fas fa-microphone"></i>' : '<i class="fas fa-microphone-slash"></i>';
         });
     })
     .catch((err) => console.log(err.message));
@@ -82,14 +93,27 @@ async function joinRoom(roomId) {
         // producer = producerTransport.produce(params);
         // console.log("producer processed");
         try {
-          videoProducer = await producerTransport.produce(videoParams);
-          // audioProducer = await producerTransport.produce(audioParams);
+          videoProducer = await producerTransport.produce({
+            ...videoParams,
+            appData: {
+              mediaTag: "video",
+              userId: socket.id,
+            },
+          });
+          audioProducer = await producerTransport.produce({
+            ...audioParams,
+            appData: {
+              mediaTag: "audio",
+              userId: socket.id,
+            },
+          });
+
           videoProducer.on("trackended", () => {
             console.log("track ended");
           });
-          // audioProducer.on("trackended", () => {
-          //   console.log("track ended");
-          // });
+          audioProducer.on("trackended", () => {
+            console.log("track ended");
+          });
           connectExistingProducers(producersIds);
         } catch (error) {
           console.error("Error producing video:", error.message);
@@ -143,15 +167,20 @@ const setProducerEvents = (producerTransport) => {
 
   producerTransport.on(
     "produce",
-    async ({ kind, rtpParameters }, callback, errback) => {
+    async ({ kind, rtpParameters, appData }, callback, errback) => {
       try {
         // console.log("producerTransport id is " + producerTransport.id);
         socket.emit(
           "produce",
-          { roomId, transportId: producerTransport.id, kind, rtpParameters },
+          {
+            roomId,
+            transportId: producerTransport.id,
+            kind,
+            rtpParameters,
+            appData,
+          },
           (producerId) => {
             if (producerId.error) errback("Error creating producer");
-            videoProducerId = producerId.id;
             // console.log("producerId is ");
             // console.log(producerId);
             callback({ id: producerId });
@@ -202,7 +231,7 @@ socket.on("newProducer", ({ producerId }) => {
       consumerTransportParams
     );
     // console.log("consumerTransport created");
-    // console.log(consumerTransport);
+    // console.log(consumertransport.id);
     setConsumerEvents(consumertransport);
     // console.log("device.rtpCapabilities", device.rtpCapabilities);
 
@@ -210,33 +239,17 @@ socket.on("newProducer", ({ producerId }) => {
 
     const TransportId = consumertransport.id;
 
-    consume(producerId, TransportId).then((consumer) => {
-      const track = consumer.track;
-      // console.log("track", track);
-      console.log("track", track);
-      if(track.kind === "video"){
-        addRemoteVideoTag(consumer.producerId);
-        let remoteVideo = document.getElementsByClassName(`vid-${consumer.producerId}`)[0];
-        remoteVideo.srcObject = new MediaStream([track]);
-        socket.emit("resumeConsumer", { roomId, consumerId: consumer.id } , (err) => {
-          if (err) console.error(err);
-        });
-      } else if (track.kind === "audio") {
-        let remoteVideo = document.getElementsByClassName(`vid-${consumer.producerId}`)[0];
-        remoteVideo.srcObject.addTrack(track);
-      }
-    });
+    handleNewProducer(producerId, TransportId);
   });
 });
 
-socket.on("producerClosed", ({ producerId }) => {
+socket.on("producerClosed", ({ videoProducerId,audioProducerId }) => {
   console.log("producer closed");
-  document.getElementsByClassName(`card-${producerId}`)[0].remove();
+  document.getElementsByClassName(`card-${videoProducerId}`)[0].remove();
   console.log("producer closed successfully");
 });
 
-
-function consume(producerId ,consumerTransportId) {
+const consume = (producerId, consumerTransportId) => {
   return new Promise((resolve, reject) => {
     socket.emit(
       "consume",
@@ -267,68 +280,121 @@ function consume(producerId ,consumerTransportId) {
   });
 }
 
+let connectExistingProducers = (producersIds) => {
+  producersIds.forEach((producerId) => {
+    createTransport("createConsumerTransport").then(
+      (consumerTransportParams) => {
+        const consumertransport = device.createRecvTransport(
+          consumerTransportParams
+        );
+        setConsumerEvents(consumertransport);
 
-let addRemoteVideoTag = (producerId) => {
+        consumerTransport.set(consumertransport.id, consumertransport);
+        handleNewProducer(producerId, consumertransport.id);
+  });
+  });
+};
+
+window.onbeforeunload = () => {
+  socket.emit(
+    "leaveRoom",
+    {
+      roomId,
+      videoProducerId: videoProducer.id.id,
+      audioProducerId: audioProducer.id.id,
+    },
+    (error) => {
+      if (error) console.error(error);
+    }
+  );
+
+  videoProducer.close();
+  audioProducer.close();
+  producerTransport.close();
+};
+
+const handleNewProducer = (producerId, consumerTransportId) => {
+  // console.log("handling new producer");
+  const consumer = consume(producerId, consumerTransportId).then((consumer) => {
+    if (consumer.kind == "video") {
+      addRemoteVideoTag(
+        consumer.producerId,
+        consumer.id,
+        consumer.track,
+        consumer.appData.userId
+      );
+    } else if (consumer.kind == "audio") {
+      addRemoteAudioTrack(consumer.track, consumer.appData.userId);
+    }
+  });
+};
+
+const addRemoteAudioTrack = async (track, userId) => {
+  console.log("adding remote audio track to", userId);
+  const video = document.getElementsByClassName(`video-${userId}`)[0];
+  if (typeof video != "undefined") {
+    video.srcObject.addTrack(track);
+    toggleAudio(track,userId);
+  } else {
+    setTimeout(() => {
+      addRemoteAudioTrack(track, userId);
+    }, 200);
+  }
+};
+
+const addRemoteVideoTag = (producerId, consumerId, track, userId) => {
+  console.log("adding remote video tag to", userId);
   const gridContainer = document.querySelector(".grid-container");
   const card = document.createElement("div");
   card.className = "card";
   card.classList.add(`card-${producerId}`);
   card.innerHTML = `
-      <div class="name">User ${producerId.substring(0,6)}</div>
-      <video class="remote-video  vid-${producerId} " id="video-${videoIdCounter++}" autoplay></video>
-      <button class="card-button" id="video-${1}"><i class="fas fa-video"></i></button>
-      <button class="card-button2" id="audio-${1}"><i class="fas fa-volume-up"></i></button>
+      <div class="name">User ${producerId.substring(0, 6)}</div>
+      <video class="remote-video  vid-${producerId} video-${userId}" id="video-${videoIdCounter++}" autoplay></video>
+      <button class="card-button" id="video-${producerId}"><i class="fas fa-video"></i></button>
+      <button class="card-button2" id="audio-${userId}"><i class="fas fa-volume-up"></i></button>
     `;
   gridContainer.appendChild(card);
+
+  const video = document.getElementsByClassName(`video-${userId}`)[0];
+  video.srcObject = new MediaStream([track]);
+  socket.emit("resumeConsumer", { roomId, consumerId }, (err) => {
+    if (err) console.error(err);
+  });
   console.log("successfully added remote video tag");
+
+  toggleVideo(track, producerId);
+
 };
 
-let connectExistingProducers = (producersIds) => {
-  createTransport(
-    "createConsumerTransport"
-  ).then((consumerTransportParams) => {
-    const consumertransport = device.createRecvTransport(consumerTransportParams);
-    setConsumerEvents(consumertransport);
-    
-    consumerTransport.set(consumertransport.id, consumertransport);
+const toggleVideo = (videoTrack,producerId ) => {
+  if (videoTrack) {
+    const videoButton =
+    document.getElementById(`video-${producerId}`);
 
-    producersIds.forEach((producerId) => {
-      consume(producerId, consumertransport.id).then((consumer) => {
-        // console.log("consumer created");
-        // console.log(consumer);
-        // console.log(consumer.producerId);
-        const track = consumer.track;
-        // console.log("track", track);
-        let remoteVideo = document.getElementsByClassName(`vid-${consumer.producerId}`)[0];
-  
-        if(typeof remoteVideo === "undefined"){
-          addRemoteVideoTag(consumer.producerId);
-          remoteVideo = document.getElementsByClassName(`vid-${consumer.producerId}`)[0];
-        }
-  
-        console.log("track", track);
-        if(track.kind === "video"){
-          remoteVideo.srcObject = new MediaStream([track]);
-          socket.emit("resumeConsumer", { roomId, consumerId: consumer.id } , (err) => {
-            if (err) console.error(err);
-          });
-        } else if (track.kind === "audio") {
-          remoteVideo.srcObject.addTrack(track);
-        }
+    videoButton.addEventListener("click", () => {
+      videoTrack.enabled = !videoTrack.enabled;
 
-      });
+      videoButton.innerHTML = videoTrack.enabled 
+      ? '<i class="fas fa-video"></i>' 
+      : '<i class="fas fa-video-slash"></i>';
     });
 
-  });
-};
+  }
+}
 
-window.onbeforeunload = () => {
-  
-  socket.emit("leaveRoom", { roomId , producerId : videoProducerId }, (error) => {
-    if (error) console.error(error);
-  });
+const toggleAudio = (audioTrack,userId ) => {
+  if (audioTrack) {
+    const audioButton =
+    document.getElementById(`audio-${userId}`);
 
-  videoProducer.close();
-  producerTransport.close();
-  // audioProducer.close();
-}; 
+    audioButton.addEventListener("click", () => {
+      audioTrack.enabled = !audioTrack.enabled;
+
+      audioButton.innerHTML = audioTrack.enabled 
+      ? '<i class="fas fa-volume-up"></i>' 
+      : '<i class="fas fa-volume-mute"></i>';
+    });
+
+  }
+}
