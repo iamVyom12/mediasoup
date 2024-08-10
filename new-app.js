@@ -293,11 +293,11 @@ socket.on(
 
     socket.leave(roomId);
     
-    console.log("producer count before leaving room is " + room.getProducers().length);
+    // console.log("producer count before leaving room is " + room.getProducers().length);
     room.getProducer(videoProducerId).close();
     room.getProducer(audioProducerId).close();
     room.removePeer(socket.id,videoProducerId,audioProducerId);
-    console.log("producer count after leaving room is " + room.getProducers().length);
+    // console.log("producer count after leaving room is " + room.getProducers().length);
 
     if (room.getPeers().size === 0) {
       rooms.delete(roomId);
@@ -305,6 +305,11 @@ socket.on(
 
     io.in(roomId).emit("producerClosed", { videoProducerId, audioProducerId });  
 
+  });
+
+  socket.on("message", ({roomId,name,message}) => {
+    // console.log("Message received: ", message);
+    socket.to(roomId).emit("messageForYou", {name,message});
   });
 
   // socket.on("disconnect", () => {

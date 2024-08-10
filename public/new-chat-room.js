@@ -1,5 +1,6 @@
 console.log("new-chat-room.js loaded");
 
+// import { types } from "mediasoup";
 import mediasoup from "mediasoup-client";
 import io from "socket.io-client";
 let videoIdCounter = 0;
@@ -249,6 +250,10 @@ socket.on("producerClosed", ({ videoProducerId,audioProducerId }) => {
   console.log("producer closed successfully");
 });
 
+socket.on("messageForYou", ({ name, message }) => {
+  addMessageToChatBox(`${name}: `+ message, 'other');
+});
+
 const consume = (producerId, consumerTransportId) => {
   return new Promise((resolve, reject) => {
     socket.emit(
@@ -398,3 +403,21 @@ const toggleAudio = (audioTrack,userId ) => {
 
   }
 }
+
+const addMessageToChatBox = (message,type) => {
+  const chatBox = document.getElementById('chat-window');
+  const messageElem = document.createElement('div');
+  messageElem.className = `message ${type}`;
+  messageElem.textContent = message;
+  chatBox.appendChild(messageElem);
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+document.getElementById('send-button').addEventListener('click', () => {
+  const message = document.getElementById('message-input').value;
+  if (message) {
+    addMessageToChatBox(`me: `+ message, 'self');
+    socket.emit('message', { roomId, name : videoProducer.id.id , message });
+    document.getElementById('message-input').value = '';
+  }
+});
